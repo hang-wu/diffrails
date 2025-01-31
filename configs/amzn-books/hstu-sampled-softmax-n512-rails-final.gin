@@ -1,0 +1,62 @@
+# Retrieval with Learned Similarities (RAILS).
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Run this as:
+# mkdir -p logs/amzn-books-l50/
+# CUDA_VISIBLE_DEVICES=0 python3 train.py --gin_config_file=configs/amzn-books/hstu-sampled-softmax-n512-rails-final.gin --master_port=12346 2>&1 | tee logs/amzn-books-l50/hstu-sampled-softmax-n512-rails-final.log
+
+train_fn.dataset_name = "amzn-books"
+train_fn.max_sequence_length = 50
+train_fn.local_batch_size = 128
+train_fn.eval_batch_size = 128
+train_fn.eval_user_max_batch_size = 128
+
+train_fn.main_module = "HSTU"
+train_fn.main_module_bf16 = True
+train_fn.item_embedding_dim = 64
+train_fn.dropout_rate = 0.5
+train_fn.user_embedding_norm = "l2_norm"
+train_fn.item_embedding_dim = 64
+
+hstu_encoder.num_blocks = 16
+hstu_encoder.num_heads = 8
+hstu_encoder.dqk = 8
+hstu_encoder.dv = 8
+hstu_encoder.linear_dropout_rate = 0.5
+
+train_fn.eval_interval = 4000
+train_fn.num_epochs = 201
+train_fn.learning_rate = 1e-3
+train_fn.weight_decay = 0
+train_fn.num_warmup_steps = 0
+
+# train_fn.save_ckpt_every_n = 5
+
+train_fn.interaction_module_type = "DotProduct"
+train_fn.top_k_method = "MIPSBruteForceTopK"
+
+train_fn.loss_module = "SampledSoftmaxLoss"
+train_fn.num_negatives = 512
+train_fn.temperature = 0.05
+
+train_fn.sampling_strategy = "local"
+train_fn.item_l2_norm = True
+train_fn.l2_norm_eps = 1e-6
+
+train_fn.enable_tf32 = True
+train_fn.full_eval_every_n = 5
+train_fn.partial_eval_num_iters = 32
+
+create_data_loader.prefetch_factor = 128
+create_data_loader.num_workers = 8

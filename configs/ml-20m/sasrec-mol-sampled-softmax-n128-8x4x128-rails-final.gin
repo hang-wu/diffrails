@@ -1,0 +1,87 @@
+# Retrieval with Learned Similarities (RAILS, https://arxiv.org/abs/2407.15462).
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Run this as:
+# mkdir -p logs/ml-20m-l200/
+# CUDA_VISIBLE_DEVICES=1 python3 train.py --gin_config_file=configs/ml-20m/sasrec-mol-sampled-softmax-n128-8x4x128-rails-final.gin --master_port=12346 2>&1 | tee logs/ml-20m-l200/sasrec-mol-sampled-softmax-n128-8x4x128-rails-final.log
+
+train_fn.dataset_name = "ml-20m"
+train_fn.max_sequence_length = 200
+train_fn.local_batch_size = 128
+
+train_fn.main_module = "SASRec"
+train_fn.dropout_rate = 0.2
+train_fn.user_embedding_norm = "layer_norm"
+train_fn.num_epochs = 151
+train_fn.item_embedding_dim = 256
+
+sasrec_encoder.num_blocks = 4
+sasrec_encoder.num_heads = 4
+sasrec_encoder.ffn_dropout_rate = 0.2
+sasrec_encoder.ffn_hidden_dim = 256
+sasrec_encoder.ffn_activation_fn = "relu"
+
+train_fn.learning_rate = 1e-3
+train_fn.weight_decay = 0
+train_fn.num_warmup_steps = 0
+
+train_fn.interaction_module_type = "MoL"
+train_fn.top_k_method = "MoLBruteForceTopK"
+
+create_mol_interaction_module.query_dot_product_groups = 8
+create_mol_interaction_module.item_dot_product_groups = 4
+create_mol_interaction_module.dot_product_dimension = 128
+create_mol_interaction_module.dot_product_l2_norm = True
+
+# MoL query-side configuration
+create_mol_interaction_module.query_dropout_rate = 0.0
+create_mol_interaction_module.query_hidden_dim = 512
+create_mol_interaction_module.query_nonlinearity = "swiglu"
+
+create_mol_interaction_module.uid_embedding_hash_sizes = [16384]
+create_mol_interaction_module.uid_dropout_rate = 0.8
+create_mol_interaction_module.uid_embedding_l2_weight_decay = 1e-1
+
+# MoL item-side configuration
+create_mol_interaction_module.item_dropout_rate = 0.1
+create_mol_interaction_module.item_hidden_dim = -1
+create_mol_interaction_module.item_nonlinearity = "swiglu"
+
+# MoL gating configuration
+create_mol_interaction_module.gating_combination_type = "glu_silu"
+create_mol_interaction_module.gating_query_hidden_dim = 128
+create_mol_interaction_module.gating_item_hidden_dim = 128
+create_mol_interaction_module.gating_item_dropout_rate = 0.0
+create_mol_interaction_module.gating_qi_hidden_dim = 128
+create_mol_interaction_module.gating_qi_dropout_rate = 0.1
+
+create_mol_interaction_module.temperature = 0.05
+create_mol_interaction_module.softmax_dropout_rate = 0.2
+
+get_similarity_function.bf16_training = True
+train_fn.eval_bf16 = True
+
+train_fn.loss_module = "SampledSoftmaxLoss"
+train_fn.loss_weights = {"uid_embedding_l2_norm": 0.1, "mi_loss": 0.001}
+train_fn.num_negatives = 128
+
+train_fn.sampling_strategy = "local"
+train_fn.temperature = 1.0
+train_fn.item_l2_norm = False
+train_fn.l2_norm_eps = 1e-6
+
+train_fn.enable_tf32 = True
+
+create_data_loader.prefetch_factor = 128
+create_data_loader.num_workers = 8
