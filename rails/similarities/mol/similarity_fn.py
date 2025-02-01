@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import math
 import torch
 import torch.nn.functional as F
+import gin
 
 # Import the topk function from difftopk functional code.
 from difftopk.functional import topk
@@ -107,25 +108,30 @@ class SoftmaxDropoutCombiner(torch.nn.Module):
 
         return combined_logits, aux_losses
 
+@gin.configurable
 class DiffTopkCombiner(torch.nn.Module):
     def __init__(
         self,
         dropout_rate: float,  # Not used directly, but kept for interface compatibility
         eps: float,
         k: int,
+        steepness: float = 1.0,
+        art_lambda: float = 0.0,
+        distribution: str = "softmax",
+        sparse: bool = False,
+        chunk_size: int = -1,
     ) -> None:
         super().__init__()
         
-        self._eps = eps
-        # Default parameters for diff-topk, you may want to tune these
-        self.k = k  # Or another value that makes sense for your use case
-        self.steepness = 10.0
-        self.art_lambda = 0.25
-        self.distribution = 'cauchy'
-        self.sparse = False
-        
-        # We'll initialize the sorting network in a lazy way when we first see the input
+        self.k = k
+        self.steepness = steepness
+        self.art_lambda = art_lambda
+        self.distribution = distribution
+        self.sparse = sparse
+        self.chunk_size = chunk_size
         self.sorting_network = NeuralSort(tau=1/self.steepness)
+        self._eps = eps
+        self._dropout_rate = dropout_rate
 
     def forward(
         self,
@@ -139,16 +145,22 @@ class DiffTopkCombiner(torch.nn.Module):
         # Flatten the first two dimensions so that topk works on each [candidate_size] vector
         gating_weights_flat = gating_weights.reshape(B * N, C)
         
-        # Clear any cached memory before the heavy computation
-        torch.cuda.empty_cache()
+        # Debug memory usage
+        # print(f"Memory allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+        # print(f"Memory cached: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
         
-        permutation_matrix_flat = self.sorting_network(gating_weights_flat)
-        
-        # Optional: force garbage collection after heavy computation
-        if not permutation_matrix_flat.requires_grad:
-            # Only delete if we don't need it for backprop
-            del gating_weights_flat
-            torch.cuda.empty_cache()
+        if self.chunk_size > 0:
+            # Process in chunks to avoid OOM
+            chunks = []
+            for i in range(0, gating_weights_flat.size(0), self.chunk_size):
+                chunk = gating_weights_flat[i:i + self.chunk_size]
+                torch.cuda.empty_cache()
+                chunk_result = self.sorting_network(chunk)
+                chunks.append(chunk_result)
+            permutation_matrix_flat = torch.cat(chunks, dim=0)
+        else:
+            # Process all at once
+            permutation_matrix_flat = self.sorting_network(gating_weights_flat)
 
         x_flat = x.reshape(B * N, C)
         combined_logits_flat = torch.bmm(x_flat.unsqueeze(1), permutation_matrix_flat).squeeze(1)

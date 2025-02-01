@@ -5,3 +5,5 @@ include 'configs/ml-1m/hstu-mol-sampled-softmax-n128-8x4x64-rails-final.gin'
 create_mol_interaction_module.combiner_type = "difftopk"
 create_mol_interaction_module.difftopk_k = 16
 create_mol_interaction_module.softmax_dropout_rate = 0.0  # Not used by difftopk but kept for interface 
+
+DiffTopkCombiner.chunk_size = 1000  # To enable chunking
