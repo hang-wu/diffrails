@@ -20,9 +20,14 @@ Implements MoL (Mixture-of-Logits) with load balancing regularization loss, as d
 from typing import Callable, Dict, List, Optional, Tuple
 
 import math
-
 import torch
 import torch.nn.functional as F
+
+# Import the topk function from difftopk functional code.
+from difftopk.functional import topk
+# Import get_sorting_network so we can build the sorting network.
+from difftopk.networks import get_sorting_network
+from difftopk.neuralsort import NeuralSort
 
 from rails.similarities.mol.embeddings_fn import MoLEmbeddingsFn
 from rails.similarities.module import SimilarityModule
@@ -86,6 +91,13 @@ class SoftmaxDropoutCombiner(torch.nn.Module):
             eps=self._eps,
             training=self.training,
         )
+        # print(f'gating_weights.shape: {gating_weights.shape}')
+        # print(f'x.shape: {x.shape}')
+        # print(f'combined_logits.shape: {combined_logits.shape}')
+        # print(f'gating_prs.shape: {gating_prs.shape}')
+
+        # print(gating_weights.requires_grad, x.requires_grad)
+        # print(combined_logits.requires_grad, gating_prs.requires_grad)
 
         aux_losses = {}
         if self.training:
@@ -95,6 +107,68 @@ class SoftmaxDropoutCombiner(torch.nn.Module):
 
         return combined_logits, aux_losses
 
+class DiffTopkCombiner(torch.nn.Module):
+    def __init__(
+        self,
+        dropout_rate: float,  # Not used directly, but kept for interface compatibility
+        eps: float,
+        k: int,
+    ) -> None:
+        super().__init__()
+        
+        self._eps = eps
+        # Default parameters for diff-topk, you may want to tune these
+        self.k = k  # Or another value that makes sense for your use case
+        self.steepness = 10.0
+        self.art_lambda = 0.25
+        self.distribution = 'cauchy'
+        self.sparse = False
+        
+        # We'll initialize the sorting network in a lazy way when we first see the input
+        self.sorting_network = NeuralSort(tau=1/self.steepness)
+
+    def forward(
+        self,
+        gating_weights: torch.Tensor,  # shape: [B, N, candidate_size]
+        x: torch.Tensor,               # shape: [B, N, candidate_size] (or similar)
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        
+
+        B, N, C = gating_weights.shape
+
+        # Flatten the first two dimensions so that topk works on each [candidate_size] vector
+        gating_weights_flat = gating_weights.reshape(B * N, C)
+        
+        # Clear any cached memory before the heavy computation
+        torch.cuda.empty_cache()
+        
+        permutation_matrix_flat = self.sorting_network(gating_weights_flat)
+        
+        # Optional: force garbage collection after heavy computation
+        if not permutation_matrix_flat.requires_grad:
+            # Only delete if we don't need it for backprop
+            del gating_weights_flat
+            torch.cuda.empty_cache()
+
+        x_flat = x.reshape(B * N, C)
+        combined_logits_flat = torch.bmm(x_flat.unsqueeze(1), permutation_matrix_flat).squeeze(1)
+        # Reshape back to [B, N, k] (or [B, N, candidate_size] if k==candidate_size)
+        combined_logits = combined_logits_flat.reshape(B, N, -1)
+        combined_logits = combined_logits.mean(dim=-1)
+        # print(f'combined_logits.shape: {combined_logits.shape}')
+        # Compute gating_prs for load balancing.
+        # (Reshape the permutation matrix to recover a per-(batch, N) structure.)
+        permutation_matrix = permutation_matrix_flat.reshape(B, N, C, -1)
+        # Here, we average over the batch dimension. (Adjust the dimension over which you average as needed.)
+        gating_prs = permutation_matrix.mean(dim=0)  # resulting shape: [N, C, k]
+        
+        aux_losses = {}
+        if self.training:
+            aux_losses["mi_loss"] = _load_balancing_mi_loss_fn(
+                gating_prs, eps=self._eps
+            )
+        
+        return combined_logits, aux_losses
 
 class MoLGatingFn(torch.nn.Module):
     """

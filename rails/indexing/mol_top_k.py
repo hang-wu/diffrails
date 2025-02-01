@@ -120,6 +120,9 @@ class MoLBruteForceTopK(MoLTopKModule):
             self._item_embeddings,
             **kwargs,
         )
+        # print(f"query_embeddings shape: {query_embeddings.shape}, item_embeddings shape: {self._item_embeddings.shape}, k: {k}")
+        # print(f"all_logits shape: {all_logits.shape}")
+
         top_k_logits, top_k_indices = torch.topk(
             all_logits,
             dim=1,

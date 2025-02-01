@@ -26,7 +26,7 @@ import torch
 
 from rails.similarities.dot_product_similarity_fn import DotProductSimilarity
 from rails.similarities.layers import GeGLU, SwiGLU
-from rails.similarities.mol.similarity_fn import MoLSimilarity, SoftmaxDropoutCombiner
+from rails.similarities.mol.similarity_fn import MoLSimilarity, SoftmaxDropoutCombiner, DiffTopkCombiner
 from rails.similarities.mol.query_embeddings_fns import RecoMoLQueryEmbeddingsFn
 from rails.similarities.mol.item_embeddings_fns import RecoMoLItemEmbeddingsFn
 
@@ -36,6 +36,20 @@ def init_mlp_xavier_weights_zero_bias(m) -> None:
         torch.nn.init.xavier_uniform(m.weight)
         if getattr(m, "bias", None) is not None:
             m.bias.data.fill_(0.0)
+
+
+def create_combiner(
+    combiner_type: str = "softmax",
+    dropout_rate: float = 0.0,
+    eps: float = 1e-6,
+    difftopk_k: int = 16,
+) -> torch.nn.Module:
+    if combiner_type == "softmax":
+        return SoftmaxDropoutCombiner(dropout_rate=dropout_rate, eps=eps)
+    elif combiner_type == "difftopk":
+        return DiffTopkCombiner(dropout_rate=dropout_rate, eps=eps, k=difftopk_k)
+    else:
+        raise ValueError(f"Unknown combiner_type: {combiner_type}")
 
 
 @gin.configurable
@@ -67,6 +81,8 @@ def create_mol_interaction_module(
     gating_item_dropout_rate: float = 0.0,
     gating_qi_dropout_rate: float = 0.0,
     eps: float = 1e-6,
+    combiner_type: str = "softmax",
+    difftopk_k: int = 16,
 ) -> Tuple[MoLSimilarity, str]:
     """
     Gin wrapper for creating MoL learned similarity.
@@ -206,8 +222,11 @@ def create_mol_interaction_module(
             ).apply(init_mlp_xavier_weights_zero_bias)
         ),
         gating_combination_type=gating_combination_type,
-        gating_normalization_fn=lambda _: SoftmaxDropoutCombiner(
-            dropout_rate=softmax_dropout_rate, eps=1e-6
+        gating_normalization_fn=lambda _: create_combiner(
+            combiner_type=combiner_type,
+            dropout_rate=softmax_dropout_rate,
+            eps=1e-6,
+            difftopk_k=difftopk_k,
         ),
         eps=eps,
         autocast_bf16=bf16_training,

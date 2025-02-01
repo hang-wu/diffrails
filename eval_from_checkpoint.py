@@ -363,7 +363,7 @@ def train_fn(
 
         return new_state_dict
 
-    checkpoint = torch.load(inference_from_ckpt)
+    checkpoint = torch.load(inference_from_ckpt, map_location=device, weights_only=False)
     checkpoint["model_state_dict"] = _rename_state_dict(
         checkpoint["model_state_dict"],
         rename_map={

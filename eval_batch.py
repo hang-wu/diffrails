@@ -97,7 +97,7 @@ def get_cmd(
     limit_eval_to_first_n: int,
     eval_dtype: str,
 ) -> str:
-    cmd = f"CUDA_VISIBLE_DEVICES=1 python3 eval_from_checkpoint.py --eval_batch_size={batch_size} --limit_eval_to_first_n={limit_eval_to_first_n} "
+    cmd = f"PYTORCH_WEIGHTS_ONLY=0 CUDA_VISIBLE_DEVICES=1 python3 eval_from_checkpoint.py --eval_batch_size={batch_size} --limit_eval_to_first_n={limit_eval_to_first_n} "
     cmd += f"--include_eval_time --eval_dtype={eval_dtype} --eval_against_brute_force "
     cmd += f"--gin_config_file={config_file} --top_k_method={algorithm}  --inference_from_ckpt={checkpoint} --master_port=12346"
     return cmd

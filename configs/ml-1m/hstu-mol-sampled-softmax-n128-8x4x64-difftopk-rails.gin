@@ -1,0 +1,7 @@
+# Include the base config
+include 'configs/ml-1m/hstu-mol-sampled-softmax-n128-8x4x64-rails-final.gin'
+
+# Configure the similarity function to use difftopk
+create_mol_interaction_module.combiner_type = "difftopk"
+create_mol_interaction_module.difftopk_k = 16
+create_mol_interaction_module.softmax_dropout_rate = 0.0  # Not used by difftopk but kept for interface 
